@@ -1,0 +1,1 @@
+{"root":["./src/manifest.ts","./src/background/service_worker.ts","./src/content/content_script.ts","./src/injected/injected.ts","./src/options/main.tsx","./src/options/ui/app.tsx","./src/popup/main.tsx","./src/shared/github.ts","./src/shared/settings.ts","./src/shared/storage.ts","./src/shared/types.ts"],"version":"5.9.3"}
