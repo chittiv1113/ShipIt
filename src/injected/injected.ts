@@ -3,14 +3,43 @@
  * Communicates back to content script via window.postMessage.
  */
 (() => {
+  const readyWindow = window as Window & { __SHIPIT_INJECTED_READY__?: boolean };
+
+  function pickBestModel(monaco: any) {
+    const models = monaco?.editor?.getModels?.() ?? [];
+    if (!models.length) return null;
+
+    const editors = monaco?.editor?.getEditors?.() ?? [];
+    const focusedEditor =
+      editors.find((ed: any) => ed?.hasTextFocus?.()) ?? editors.find((ed: any) => ed?.hasWidgetFocus?.());
+    const focusedModel = focusedEditor?.getModel?.();
+    if (focusedModel) return focusedModel;
+
+    const attachedModels = models.filter((m: any) => {
+      try {
+        return typeof m?.isAttachedToEditor !== "function" || m.isAttachedToEditor();
+      } catch {
+        return true;
+      }
+    });
+
+    const candidates = attachedModels.length ? attachedModels : models;
+    return candidates.reduce((best: any, model: any) => {
+      const bestLen = (best?.getValue?.() ?? "").trim().length;
+      const currentLen = (model?.getValue?.() ?? "").trim().length;
+      return currentLen > bestLen ? model : best;
+    }, candidates[0]);
+  }
+
   function getMonacoCode(): { code: string; languageId?: string } | null {
     try {
       const w = window as any;
       const monaco = w?.monaco;
       if (!monaco?.editor?.getModels) return null;
-      const models = monaco.editor.getModels();
-      if (!models?.length) return null;
-      const model = models[0];
+
+      const model = pickBestModel(monaco);
+      if (!model) return null;
+
       const code = model.getValue?.() ?? "";
       const languageId = model.getLanguageId?.() ?? undefined;
       return { code, languageId };
@@ -32,4 +61,6 @@
       "*"
     );
   });
+
+  readyWindow.__SHIPIT_INJECTED_READY__ = true;
 })();

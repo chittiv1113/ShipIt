@@ -90,7 +90,7 @@ export function App() {
 
           <div>
             <label>Repo (owner/repo)</label>
-            <input value={repoFullName} onChange={(e) => setRepoFullName(e.target.value)} placeholder="chittiv1113/leetcode" />
+            <input value={repoFullName} onChange={(e) => setRepoFullName(e.target.value)} placeholder="Owner/leetcode" />
             <div className="row" style={{ marginTop: 12 }}>
               <div>
                 <label>Branch</label>

@@ -1,7 +1,22 @@
-import React from "react";
+import React, { useEffect } from "react";
 import ReactDOM from "react-dom/client";
 
 function Popup() {
+  useEffect(() => {
+    const openToast = async () => {
+      try {
+        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        if (tab?.id === undefined) return;
+
+        await chrome.tabs.sendMessage(tab.id, { type: "SHIPIT_OPEN_TOAST" });
+      } catch {
+        // Ignore silently when not on a supported tab/page.
+      }
+    };
+
+    void openToast();
+  }, []);
+
   return (
     <div className="wrap">
       <p className="title">ShipIt</p>
