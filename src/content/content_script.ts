@@ -2,10 +2,27 @@ import type { MonacoCodeResponse, PushResponse } from "../shared/types";
 
 const TOAST_ID = "shipit-toast-root";
 const TOAST_LAUNCHER_ID = "shipit-toast-launcher";
+const CONFETTI_ROOT_ID = "shipit-confetti-root";
+const CONFETTI_DURATION_MS = 5000;
+const CONFETTI_SPAWN_INTERVAL_MS = 120;
+const CONFETTI_PARTICLES_PER_BATCH = 12;
+const SUBMISSION_RESULT_TIMEOUT_MS = 120_000;
+
+type SubmissionResultPayload = {
+  status?: string;
+  submissionId?: string;
+};
+
 let toastShownForSlug: string | null = null;
 let activeSlug: string | null = null;
 let activeRouteKey: string | null = null;
 let injectedReadyPromise: Promise<void> | null = null;
+let pendingSubmissionStartedAt: number | null = null;
+let pendingSubmissionSlug: string | null = null;
+let confettiIntervalId: number | null = null;
+let confettiStopTimerId: number | null = null;
+
+const CONFETTI_COLORS = ["#22c55e", "#3b82f6", "#f59e0b", "#ef4444", "#06b6d4", "#ec4899"];
 
 function getSlugFromUrl(): string | null {
   const m = window.location.pathname.match(/^\/problems\/([^\/]+)\/?/);
@@ -75,6 +92,167 @@ function findAccepted(): boolean {
   // Heuristic: look for any element with exact text "Accepted" (LeetCode updates often)
   const nodes = Array.from(document.querySelectorAll("span, div, p"));
   return nodes.some((n) => n.textContent?.trim() === "Accepted");
+}
+
+function normalizeStatus(value: string | undefined): string {
+  return (value ?? "").replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+function clearPendingSubmission() {
+  pendingSubmissionStartedAt = null;
+  pendingSubmissionSlug = null;
+}
+
+function markSubmissionStarted() {
+  pendingSubmissionStartedAt = Date.now();
+  pendingSubmissionSlug = getSlugFromUrl();
+}
+
+function hasFreshPendingSubmission(): boolean {
+  if (!pendingSubmissionStartedAt) return false;
+  return Date.now() - pendingSubmissionStartedAt <= SUBMISSION_RESULT_TIMEOUT_MS;
+}
+
+function stopConfetti() {
+  if (confettiIntervalId !== null) {
+    window.clearInterval(confettiIntervalId);
+    confettiIntervalId = null;
+  }
+
+  if (confettiStopTimerId !== null) {
+    window.clearTimeout(confettiStopTimerId);
+    confettiStopTimerId = null;
+  }
+
+  document.getElementById(CONFETTI_ROOT_ID)?.remove();
+}
+
+function getConfettiRoot(): HTMLDivElement {
+  const existing = document.getElementById(CONFETTI_ROOT_ID) as HTMLDivElement | null;
+  if (existing) return existing;
+
+  const root = document.createElement("div");
+  root.id = CONFETTI_ROOT_ID;
+  root.style.position = "fixed";
+  root.style.inset = "0";
+  root.style.pointerEvents = "none";
+  root.style.overflow = "hidden";
+  root.style.zIndex = "2147483646";
+  document.documentElement.appendChild(root);
+  return root;
+}
+
+function spawnConfettiBatch(root: HTMLElement, endAtMs: number) {
+  const now = Date.now();
+  if (now >= endAtMs) return;
+
+  const remainingRatio = Math.max(0.35, (endAtMs - now) / CONFETTI_DURATION_MS);
+  const particleCount = Math.max(8, Math.round(CONFETTI_PARTICLES_PER_BATCH * remainingRatio));
+
+  for (let i = 0; i < particleCount; i += 1) {
+    const piece = document.createElement("span");
+    const size = 7 + Math.random() * 7;
+    const left = Math.random() * 100;
+    const startRotation = Math.random() * 360;
+    const spin = 520 + Math.random() * 760;
+    const drift = -180 + Math.random() * 360;
+    const fallDistance = window.innerHeight + 90 + Math.random() * 180;
+    const delay = Math.random() * 180;
+    const duration = 2200 + Math.random() * 1700;
+    const isRound = Math.random() < 0.2;
+
+    piece.style.position = "absolute";
+    piece.style.left = `${left}%`;
+    piece.style.top = "-24px";
+    piece.style.width = `${size}px`;
+    piece.style.height = isRound ? `${size}px` : `${Math.max(4, size * 0.56)}px`;
+    piece.style.borderRadius = isRound ? "999px" : "2px";
+    piece.style.background = CONFETTI_COLORS[Math.floor(Math.random() * CONFETTI_COLORS.length)];
+    piece.style.opacity = "0";
+    piece.style.transform = `translate3d(0, -18px, 0) rotate(${startRotation}deg)`;
+    piece.style.willChange = "transform, opacity";
+    root.appendChild(piece);
+
+    piece.animate(
+      [
+        { opacity: 0, transform: `translate3d(0, -18px, 0) rotate(${startRotation}deg)` },
+        { opacity: 1, offset: 0.08 },
+        {
+          opacity: 0.95,
+          transform: `translate3d(${drift}px, ${fallDistance}px, 0) rotate(${startRotation + spin}deg)`,
+          offset: 0.86
+        },
+        {
+          opacity: 0,
+          transform: `translate3d(${drift * 1.15}px, ${fallDistance + 120}px, 0) rotate(${startRotation + spin + 80}deg)`
+        }
+      ],
+      {
+        delay,
+        duration,
+        easing: "cubic-bezier(0.21, 0.65, 0.27, 1)",
+        fill: "forwards"
+      }
+    );
+
+    window.setTimeout(() => piece.remove(), Math.ceil(delay + duration + 120));
+  }
+}
+
+function playSubmissionConfetti() {
+  stopConfetti();
+  const root = getConfettiRoot();
+  const endAtMs = Date.now() + CONFETTI_DURATION_MS;
+
+  const spawn = () => {
+    spawnConfettiBatch(root, endAtMs);
+  };
+
+  spawn();
+  confettiIntervalId = window.setInterval(spawn, CONFETTI_SPAWN_INTERVAL_MS);
+  confettiStopTimerId = window.setTimeout(stopConfetti, CONFETTI_DURATION_MS + 1800);
+}
+
+function handleSubmissionResult(payload: SubmissionResultPayload) {
+  if (!hasFreshPendingSubmission()) {
+    clearPendingSubmission();
+    return;
+  }
+
+  const normalizedStatus = normalizeStatus(payload.status);
+  const currentSlug = getSlugFromUrl();
+  const pendingSlugMatches = !pendingSubmissionSlug || !currentSlug || pendingSubmissionSlug === currentSlug;
+
+  if (!pendingSlugMatches) {
+    clearPendingSubmission();
+    return;
+  }
+
+  if (normalizedStatus === "accepted") {
+    const slug = currentSlug ?? pendingSubmissionSlug;
+    if (slug && toastShownForSlug !== slug) {
+      showToast(slug);
+    }
+    playSubmissionConfetti();
+  }
+
+  clearPendingSubmission();
+}
+
+function handleInjectedWindowMessage(event: MessageEvent) {
+  if (event.source !== window) return;
+
+  const data = event.data as { type?: string; payload?: SubmissionResultPayload } | null;
+  if (!data?.type) return;
+
+  if (data.type === "SHIPIT_SUBMISSION_STARTED") {
+    markSubmissionStarted();
+    return;
+  }
+
+  if (data.type === "SHIPIT_SUBMISSION_RESULT") {
+    handleSubmissionResult(data.payload ?? {});
+  }
 }
 
 function removeToast() {
@@ -529,6 +707,8 @@ function boot() {
   patchHistoryMethod("pushState");
   patchHistoryMethod("replaceState");
   window.addEventListener("popstate", notifyRouteChange);
+  window.addEventListener("message", handleInjectedWindowMessage);
+  void ensureInjected();
 
   const refreshForCurrentRoute = () => {
     const routeKey = getRouteKey();
@@ -541,6 +721,9 @@ function boot() {
     activeSlug = slug;
     removeToast();
     removeToastLauncher();
+    clearPendingSubmission();
+    stopConfetti();
+    void ensureInjected();
     if (!slug) return;
 
     if (toastShownForSlug !== slug && findAccepted()) {
