@@ -428,7 +428,18 @@ function tryGetCodeFromDOM(): string | null {
         );
 
         if (lineElements.length > 0) {
-          const code = lineElements.map(line => {
+          const orderedLineElements = lineElements
+            .map((line) => {
+              const rect = (line as HTMLElement).getBoundingClientRect();
+              return { line, top: rect.top, left: rect.left };
+            })
+            .sort((a, b) => {
+              if (Math.abs(a.top - b.top) > 0.5) return a.top - b.top;
+              return a.left - b.left;
+            })
+            .map((entry) => entry.line);
+
+          const code = orderedLineElements.map(line => {
             // Get innerText which preserves spacing better than textContent
             const text = (line as HTMLElement).innerText || line.textContent || '';
             return text;
